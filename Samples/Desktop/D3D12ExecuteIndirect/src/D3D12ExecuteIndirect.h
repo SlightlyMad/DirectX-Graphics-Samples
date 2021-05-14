@@ -35,7 +35,7 @@ public:
 
 private:
     static const UINT FrameCount = 3;
-    static const UINT TriangleCount = 1024;
+    static const UINT TriangleCount = 512;
     static const UINT TriangleResourceCount = TriangleCount * FrameCount;
     static const UINT CommandSizePerFrame;                // The size of the indirect commands to draw all of the triangles in a single frame.
     static const UINT CommandBufferCounterOffset;        // The offset of the UAV counter in the processed command buffer.
@@ -76,7 +76,9 @@ private:
     struct IndirectCommand
     {
         D3D12_GPU_VIRTUAL_ADDRESS cbv;
+        D3D12_VERTEX_BUFFER_VIEW vbv;
         D3D12_DRAW_ARGUMENTS drawArguments;
+        
     };
 
     // Graphics root signature parameter offsets.
@@ -143,12 +145,14 @@ private:
     ComPtr<ID3D12GraphicsCommandList> m_commandList;
     ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
     ComPtr<ID3D12Resource> m_vertexBuffer;
+    ComPtr<ID3D12Resource> m_vertexBuffer2;
     ComPtr<ID3D12Resource> m_constantBuffer;
     ComPtr<ID3D12Resource> m_depthStencil;
     ComPtr<ID3D12Resource> m_commandBuffer;
     ComPtr<ID3D12Resource> m_processedCommandBuffers[FrameCount];
     ComPtr<ID3D12Resource> m_processedCommandBufferCounterReset;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+    D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView2;
 
     void LoadPipeline();
     void LoadAssets();

@@ -295,6 +295,7 @@ void D3D12ExecuteIndirect::LoadAssets()
     // We will flush the GPU at the end of this method to ensure the resources are not
     // prematurely destroyed.
     ComPtr<ID3D12Resource> vertexBufferUpload;
+    ComPtr<ID3D12Resource> vertexBufferUpload2;
     ComPtr<ID3D12Resource> commandBufferUpload;
 
     // Create the vertex buffer.
@@ -341,6 +342,55 @@ void D3D12ExecuteIndirect::LoadAssets()
         m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
         m_vertexBufferView.StrideInBytes = sizeof(Vertex);
         m_vertexBufferView.SizeInBytes = sizeof(triangleVertices);
+    }
+
+    // Create the vertex buffer.
+    {
+        // Define the geometry for a triangle.
+        Vertex triangleVertices[] =
+        {
+            { { -TriangleHalfWidth, TriangleHalfWidth, TriangleDepth } },
+            { { TriangleHalfWidth, TriangleHalfWidth, TriangleDepth } },
+            { { -TriangleHalfWidth, -TriangleHalfWidth, TriangleDepth } },
+            { { TriangleHalfWidth, -TriangleHalfWidth, TriangleDepth } }
+            
+            
+        };
+
+        const UINT vertexBufferSize = sizeof(triangleVertices);
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&m_vertexBuffer2)));
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+            D3D12_HEAP_FLAG_NONE,
+            &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize),
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&vertexBufferUpload2)));
+
+        NAME_D3D12_OBJECT(m_vertexBuffer2);
+
+        // Copy data to the intermediate upload heap and then schedule a copy
+        // from the upload heap to the vertex buffer.
+        D3D12_SUBRESOURCE_DATA vertexData = {};
+        vertexData.pData = reinterpret_cast<UINT8*>(triangleVertices);
+        vertexData.RowPitch = vertexBufferSize;
+        vertexData.SlicePitch = vertexData.RowPitch;
+
+        UpdateSubresources<1>(m_commandList.Get(), m_vertexBuffer2.Get(), vertexBufferUpload2.Get(), 0, 0, 1, &vertexData);
+        m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_vertexBuffer2.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER));
+
+        // Initialize the vertex buffer view.
+        m_vertexBufferView2.BufferLocation = m_vertexBuffer2->GetGPUVirtualAddress();
+        m_vertexBufferView2.StrideInBytes = sizeof(Vertex);
+        m_vertexBufferView2.SizeInBytes = sizeof(triangleVertices);
     }
 
     // Create the depth stencil view.
@@ -420,10 +470,13 @@ void D3D12ExecuteIndirect::LoadAssets()
     // Create the command signature used for indirect drawing.
     {
         // Each command consists of a CBV update and a DrawInstanced call.
-        D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[2] = {};
+        D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[3] = {};
         argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT_BUFFER_VIEW;
         argumentDescs[0].ConstantBufferView.RootParameterIndex = Cbv;
-        argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
+        argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_VERTEX_BUFFER_VIEW;
+        argumentDescs[1].VertexBuffer.Slot = 0;
+        argumentDescs[2].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
+        
 
         D3D12_COMMAND_SIGNATURE_DESC commandSignatureDesc = {};
         commandSignatureDesc.pArgumentDescs = argumentDescs;
@@ -465,12 +518,26 @@ void D3D12ExecuteIndirect::LoadAssets()
         for (UINT frame = 0; frame < FrameCount; frame++)
         {
             for (UINT n = 0; n < TriangleCount; n++)
-            {
+            {               
+                UINT meshIndex = n % 2;
                 commands[commandIndex].cbv = gpuAddress;
-                commands[commandIndex].drawArguments.VertexCountPerInstance = 3;
+                commands[commandIndex].drawArguments.VertexCountPerInstance = meshIndex == 0 ? 3 : 4;
                 commands[commandIndex].drawArguments.InstanceCount = 1;
                 commands[commandIndex].drawArguments.StartVertexLocation = 0;
                 commands[commandIndex].drawArguments.StartInstanceLocation = 0;
+
+                if (meshIndex == 0)
+                {
+                    commands[commandIndex].vbv.BufferLocation = m_vertexBufferView.BufferLocation;
+                    commands[commandIndex].vbv.SizeInBytes = m_vertexBufferView.SizeInBytes;
+                    commands[commandIndex].vbv.StrideInBytes = m_vertexBufferView.StrideInBytes;
+                }
+                else
+                {
+                    commands[commandIndex].vbv.BufferLocation = m_vertexBufferView2.BufferLocation;
+                    commands[commandIndex].vbv.SizeInBytes = m_vertexBufferView2.SizeInBytes;
+                    commands[commandIndex].vbv.StrideInBytes = m_vertexBufferView2.StrideInBytes;
+                }
 
                 commandIndex++;
                 gpuAddress += sizeof(SceneConstantBuffer);
@@ -782,7 +849,7 @@ void D3D12ExecuteIndirect::PopulateCommandLists()
         m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
         m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-        m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+        //m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
         if (m_enableCulling)
         {

@@ -23,7 +23,11 @@ struct SceneConstantBuffer
 struct IndirectCommand
 {
     uint2 cbvAddress;
+    uint2 vbvAddress;
+    uint vbvSizeInBytes;
+    uint vbvStrideInBytes;
     uint4 drawArguments;
+    
 };
 
 cbuffer RootConstants : register(b0)
